@@ -1,18 +1,14 @@
-"use server"
+import { NextResponse } from "next/server"
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024
 const ALLOWED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"])
 const REQUEST_TIMEOUT_MS = 30_000
 
-export type TumorPrediction = {
+type TumorPrediction = {
   tumor: boolean
   type: string
   confidence: number
 }
-
-export type PredictionResult =
-  | { ok: true; prediction: TumorPrediction; raw: unknown }
-  | { ok: false; error: string }
 
 function isTumorPrediction(value: unknown): value is TumorPrediction {
   if (typeof value !== "object" || value === null) return false
@@ -29,31 +25,42 @@ function isTumorPrediction(value: unknown): value is TumorPrediction {
   )
 }
 
-export async function predictTumor(formData: FormData): Promise<PredictionResult> {
+function errorResponse(error: string, status: number) {
+  return NextResponse.json({ error }, { status, headers: { "Cache-Control": "no-store" } })
+}
+
+export async function POST(request: Request) {
+  let formData: FormData
+  try {
+    formData = await request.formData()
+  } catch {
+    return errorResponse("Send a multipart form with an image file.", 400)
+  }
+
   const file = formData.get("file")
   if (!(file instanceof File) || file.size === 0) {
-    return { ok: false, error: "Choose an image before starting the analysis." }
+    return errorResponse("Choose an image before starting the analysis.", 400)
   }
   if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
-    return { ok: false, error: "Upload a PNG, JPG, or WEBP image." }
+    return errorResponse("Upload a PNG, JPG, or WEBP image.", 415)
   }
   if (file.size > MAX_FILE_SIZE) {
-    return { ok: false, error: "This image is larger than the 20 MB limit." }
+    return errorResponse("This image is larger than the 20 MB limit.", 413)
   }
 
   const serviceUrl = process.env.AI_SERVICE_URL
   if (!serviceUrl) {
-    return { ok: false, error: "The AI service is not configured. Set AI_SERVICE_URL and try again." }
+    return errorResponse("The AI service is not configured. Set AI_SERVICE_URL and try again.", 503)
   }
 
   let endpoint: URL
   try {
     endpoint = new URL(`${serviceUrl.trim().replace(/\/+$/, "")}/predict`)
     if (endpoint.protocol !== "http:" && endpoint.protocol !== "https:") {
-      return { ok: false, error: "The AI service configuration is invalid." }
+      return errorResponse("The AI service configuration is invalid.", 500)
     }
   } catch {
-    return { ok: false, error: "The AI service configuration is invalid." }
+    return errorResponse("The AI service configuration is invalid.", 500)
   }
 
   const upstreamForm = new FormData()
@@ -70,28 +77,28 @@ export async function predictTumor(formData: FormData): Promise<PredictionResult
     })
 
     if (!response.ok) {
-      return { ok: false, error: "The AI service could not analyze this image. Please try again." }
+      return errorResponse("The AI service could not analyze this image. Please try again.", 502)
     }
 
-    let raw: unknown
+    let prediction: unknown
     try {
-      raw = await response.json()
+      prediction = await response.json()
     } catch {
-      return { ok: false, error: "The AI service returned an unreadable response. Please try again." }
+      return errorResponse("The AI service returned an unreadable response. Please try again.", 502)
     }
 
-    if (!isTumorPrediction(raw)) {
-      return { ok: false, error: "The AI service returned an unexpected result. Please try again." }
+    if (!isTumorPrediction(prediction)) {
+      return errorResponse("The AI service returned an unexpected result. Please try again.", 502)
     }
 
-    return { ok: true, prediction: raw, raw }
+    return NextResponse.json(prediction, { headers: { "Cache-Control": "no-store" } })
   } catch {
-    return {
-      ok: false,
-      error: controller.signal.aborted
+    return errorResponse(
+      controller.signal.aborted
         ? "The analysis took too long. Please try again."
         : "Unable to reach the AI service. Check that it is running and try again.",
-    }
+      controller.signal.aborted ? 504 : 502,
+    )
   } finally {
     clearTimeout(timeout)
   }

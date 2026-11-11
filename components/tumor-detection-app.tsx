@@ -3,9 +3,25 @@
 import { useRef, useState } from 'react'
 import Image from 'next/image'
 import { ArrowDown, ArrowRight, ArrowUpRight, Activity, Brain, ChevronRight, CircleHelp, FileImage, FileJson2, Fingerprint, LockKeyhole, Microscope, RotateCcw, ScanLine, ShieldCheck, Upload, X } from 'lucide-react'
-import { predictTumor, type TumorPrediction } from '@/actions/api/predict'
+type Result = {
+  tumor: boolean
+  type: string
+  confidence: number
+}
 
-type Result = TumorPrediction
+function isTumorPrediction(value: unknown): value is Result {
+  if (typeof value !== 'object' || value === null) return false
+  const prediction = value as Record<string, unknown>
+  return (
+    typeof prediction.tumor === 'boolean' &&
+    typeof prediction.type === 'string' &&
+    prediction.type.length > 0 &&
+    typeof prediction.confidence === 'number' &&
+    Number.isFinite(prediction.confidence) &&
+    prediction.confidence >= 0 &&
+    prediction.confidence <= 100
+  )
+}
 
 const steps = [
   { number: '01', icon: Upload, title: 'Upload a scan', text: 'Add a brain MRI image in PNG, JPG, or WEBP format.' },
@@ -70,13 +86,26 @@ export function TumorDetectionApp() {
     formData.append('file', file)
 
     try {
-      const response = await predictTumor(formData)
+      const response = await fetch('/api/predict', {
+        method: 'POST',
+        body: formData,
+        cache: 'no-store',
+      })
+      const payload: unknown = await response.json().catch(() => null)
       if (!response.ok) {
-        setAnalysisError(response.error)
+        const message =
+          typeof payload === 'object' && payload !== null && 'error' in payload && typeof payload.error === 'string'
+            ? payload.error
+            : 'The analysis request failed. Please try again.'
+        setAnalysisError(message)
         return
       }
-      setResult(response.prediction)
-      setRawResponse(response.raw)
+      if (!isTumorPrediction(payload)) {
+        setAnalysisError('The AI service returned an unexpected result. Please try again.')
+        return
+      }
+      setResult(payload)
+      setRawResponse(payload)
     } catch {
       setAnalysisError('Something went wrong while analyzing the image. Please try again.')
     } finally {
