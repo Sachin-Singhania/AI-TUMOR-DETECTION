@@ -2,14 +2,15 @@
 
 import { useRef, useState } from 'react'
 import Image from 'next/image'
-import { ArrowDown, ArrowRight, ArrowUpRight, Activity, Brain, Check, ChevronRight, CircleHelp, FileImage, FileJson2, Fingerprint, LockKeyhole, Microscope, RotateCcw, ScanLine, ShieldCheck, Upload, X } from 'lucide-react'
+import { ArrowDown, ArrowRight, ArrowUpRight, Activity, Brain, ChevronRight, CircleHelp, FileImage, FileJson2, Fingerprint, LockKeyhole, Microscope, RotateCcw, ScanLine, ShieldCheck, Upload, X } from 'lucide-react'
+import { predictTumor, type TumorPrediction } from '@/actions/api/predict'
 
-type Result = { status: string; label: string; confidence: number; note: string }
+type Result = TumorPrediction
 
 const steps = [
-  { number: '01', icon: Upload, title: 'Upload a scan', text: 'Add a brain MRI image in a supported format. Your file stays in this browser demo.' },
-  { number: '02', icon: ScanLine, title: 'AI-assisted review', text: 'The image is prepared for analysis and examined for patterns of interest.' },
-  { number: '03', icon: Activity, title: 'Review the result', text: 'Explore a clear summary and confidence estimate, then discuss findings with a clinician.' },
+  { number: '01', icon: Upload, title: 'Upload a scan', text: 'Add a brain MRI image in PNG, JPG, or WEBP format.' },
+  { number: '02', icon: ScanLine, title: 'AI-assisted review', text: 'Your image is sent to the configured AI service for analysis.' },
+  { number: '03', icon: Activity, title: 'Review the result', text: 'Explore the returned classification and confidence estimate with a clinician.' },
 ]
 
 export function TumorDetectionApp() {
@@ -18,6 +19,8 @@ export function TumorDetectionApp() {
   const [preview, setPreview] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<Result | null>(null)
+  const [rawResponse, setRawResponse] = useState<unknown>(null)
+  const [analysisError, setAnalysisError] = useState('')
   const [showJson, setShowJson] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [uploadError, setUploadError] = useState('')
@@ -37,6 +40,8 @@ export function TumorDetectionApp() {
     setFile(next)
     setPreview(URL.createObjectURL(next))
     setResult(null)
+    setRawResponse(null)
+    setAnalysisError('')
     setShowJson(false)
     setUploadError('')
   }
@@ -46,18 +51,37 @@ export function TumorDetectionApp() {
     setPreview('')
     setFile(null)
     setResult(null)
+    setRawResponse(null)
+    setAnalysisError('')
     setShowJson(false)
     setLoading(false)
     if (inputRef.current) inputRef.current.value = ''
   }
 
-  function analyze() {
+  async function analyze() {
     if (!file || loading) return
     setLoading(true)
-    window.setTimeout(() => {
-      setResult({ status: 'Demo only', label: 'Analysis simulation', confidence: 0, note: 'No medical model is connected. This interface does not analyze images or provide a diagnosis.' })
+    setAnalysisError('')
+    setResult(null)
+    setRawResponse(null)
+    setShowJson(false)
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      const response = await predictTumor(formData)
+      if (!response.ok) {
+        setAnalysisError(response.error)
+        return
+      }
+      setResult(response.prediction)
+      setRawResponse(response.raw)
+    } catch {
+      setAnalysisError('Something went wrong while analyzing the image. Please try again.')
+    } finally {
       setLoading(false)
-    }, 1800)
+    }
   }
 
   return (
@@ -73,9 +97,9 @@ export function TumorDetectionApp() {
         <div className="hero-copy">
           <div className="eyebrow"><span className="status-dot" /> MEDICAL IMAGING, REIMAGINED</div>
           <h1>Clarity for<br />the <span>complex.</span></h1>
-          <p className="hero-description">A closer look at brain imaging, powered by artificial intelligence. Explore an intuitive screening workflow built to support—not replace—clinical expertise.</p>
+          <p className="hero-description">A closer look at brain imaging, powered by an AI service. Explore an intuitive screening workflow built to support—not replace—clinical expertise.</p>
           <div className="hero-actions"><a className="button-primary" href="#analyzer">Explore the analyzer <ArrowRight size={16} /></a><a className="button-quiet" href="#process">Discover the process <ArrowDown size={15} /></a></div>
-          <div className="hero-footnote"><ShieldCheck size={15} /> Private by design <span className="foot-divider" /> Educational demo</div>
+          <div className="hero-footnote"><ShieldCheck size={15} /> AI service powered <span className="foot-divider" /> Educational demo</div>
         </div>
         <div className="hero-visual" aria-label="Illustrative brain MRI scan">
           <div className="visual-halo" />
@@ -96,21 +120,21 @@ export function TumorDetectionApp() {
       </section>
 
       <section className="analyzer-section" id="analyzer">
-        <div className="analyzer-heading"><div><div className="eyebrow muted-eyebrow">INTERACTIVE DEMO</div><h2>Image <span>analyzer.</span></h2><p>Upload an image to explore the experience. This demo does not run a medical AI model.</p></div><div className="secure-label"><LockKeyhole size={14} /> LOCAL PREVIEW</div></div>
+        <div className="analyzer-heading"><div><div className="eyebrow muted-eyebrow">AI-ASSISTED SCREENING</div><h2>Image <span>analyzer.</span></h2><p>Upload an MRI image to request a prediction from the configured medical imaging service.</p></div><div className="secure-label"><LockKeyhole size={14} /> AI SERVICE</div></div>
         <div className="workspace">
           <div className="upload-panel">
             <div className="panel-topline"><span><span className="tiny-square" /> IMAGE INPUT</span><span>01 / 01</span></div>
-            {!preview ? <button className={`dropzone ${dragging ? 'is-dragging' : ''}`} onClick={() => inputRef.current?.click()} onDragOver={(e) => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={(e) => { e.preventDefault(); setDragging(false); selectFile(e.dataTransfer.files[0]) }} aria-label="Choose or drop an image to upload"><span className="upload-icon"><Upload size={21} /></span><strong>Drop your scan here</strong><span>or <u>browse files</u> to upload</span><span className="file-types">PNG, JPG, WEBP <i /> MAX 20 MB</span>{uploadError && <span className="upload-error" role="alert">{uploadError}</span>}</button> : <div className="image-preview"><Image src={preview} alt={`Preview of ${file?.name ?? 'uploaded scan'}`} fill unoptimized sizes="(max-width: 700px) 100vw, 50vw" /><div className="preview-overlay"><span><FileImage size={14} /> {file?.name}</span><button onClick={reset} aria-label="Remove selected image"><X size={15} /></button></div>{loading && <div className="scan-overlay"><div className="scan-sweep" /><span><ScanLine size={17} /> PREPARING DEMO</span></div>}</div>}
+            {!preview ? <button className={`dropzone ${dragging ? 'is-dragging' : ''}`} onClick={() => inputRef.current?.click()} onDragOver={(e) => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={(e) => { e.preventDefault(); setDragging(false); selectFile(e.dataTransfer.files[0]) }} aria-label="Choose or drop an image to upload"><span className="upload-icon"><Upload size={21} /></span><strong>Drop your scan here</strong><span>or <u>browse files</u> to upload</span><span className="file-types">PNG, JPG, WEBP <i /> MAX 20 MB</span>{uploadError && <span className="upload-error" role="alert">{uploadError}</span>}</button> : <div className="image-preview"><Image src={preview} alt={`Preview of ${file?.name ?? 'uploaded scan'}`} fill unoptimized sizes="(max-width: 700px) 100vw, 50vw" /><div className="preview-overlay"><span><FileImage size={14} /> {file?.name}</span><button onClick={reset} aria-label="Remove selected image"><X size={15} /></button></div>{loading && <div className="scan-overlay"><div className="scan-sweep" /><span><ScanLine size={17} /> ANALYZING MRI</span></div>}</div>}
             <input ref={inputRef} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={(e) => selectFile(e.target.files?.[0])} aria-label="Select an image file" />
-            <div className="upload-footer"><span><LockKeyhole size={13} /> Files stay on this device</span>{file && <span>{(file.size / (1024 * 1024)).toFixed(2)} MB</span>}</div>
+            <div className="upload-footer"><span><LockKeyhole size={13} /> Sent to AI service for analysis</span>{file && <span>{(file.size / (1024 * 1024)).toFixed(2)} MB</span>}</div>
           </div>
           <div className="result-panel">
-            <div className="panel-topline"><span><span className="tiny-square cyan-square" /> ANALYSIS OUTPUT</span><span>{result ? 'COMPLETE' : 'AWAITING INPUT'}</span></div>
-            {!result && !loading ? <div className="result-empty"><div className="empty-orbit"><Microscope size={23} strokeWidth={1.4} /><span /></div><h3>Your results, thoughtfully presented.</h3><p>Upload an image to preview the analysis interface.</p><div className="output-placeholder"><span>CLASSIFICATION</span><i /><span>CONFIDENCE</span><i /></div></div> : loading ? <div className="result-loading" role="status"><div className="loader-ring"><ScanLine size={24} /></div><strong>Preparing your demo</strong><span>This is a simulated experience</span></div> : <div className="result-content" aria-live="polite"><div className="result-status"><span className="result-icon"><CircleHelp size={18} /></span><span><small>STATUS</small><b>{result?.status}</b></span><span className="demo-badge">DEMO</span></div><div className="result-class"><span>CLASSIFICATION</span><h3>{result?.label}</h3></div><div className="confidence-row"><span>CONFIDENCE SCORE</span><span className="confidence-value">—</span></div><div className="confidence-track"><span /></div><div className="result-disclaimer">{result?.note}</div><button className="json-toggle" onClick={() => setShowJson(!showJson)}><FileJson2 size={15} /> {showJson ? 'Hide' : 'Inspect'} raw JSON <span>{showJson ? '−' : '+'}</span></button>{showJson && <pre className="json-output">{JSON.stringify({ demo: true, modelConnected: false, status: result?.status, classification: result?.label, confidence: null, note: result?.note }, null, 2)}</pre>}</div>}
-            <div className="result-actions">{result ? <button className="button-secondary" onClick={reset}><RotateCcw size={15} /> Start over</button> : <button className="analyze-button" onClick={analyze} disabled={!file || loading}>{loading ? <><span className="button-spinner" /> Preparing demo…</> : <>Analyze image <ArrowRight size={16} /></>}</button>}</div>
+            <div className="panel-topline"><span><span className="tiny-square cyan-square" /> ANALYSIS OUTPUT</span><span>{result ? 'COMPLETE' : loading ? 'PROCESSING' : analysisError ? 'SERVICE ERROR' : 'AWAITING INPUT'}</span></div>
+            {!result && !loading ? <div className="result-empty"><div className="empty-orbit"><Microscope size={23} strokeWidth={1.4} /><span /></div><h3>Your results, thoughtfully presented.</h3><p>{analysisError || 'Upload an image to request an analysis from the AI service.'}</p><div className="output-placeholder"><span>CLASSIFICATION</span><i /><span>CONFIDENCE</span><i /></div></div> : loading ? <div className="result-loading" role="status"><div className="loader-ring"><ScanLine size={24} /></div><strong>Analyzing your image</strong><span>Waiting for the AI service response</span></div> : <div className="result-content" aria-live="polite"><div className="result-status"><span className="result-icon"><CircleHelp size={18} /></span><span><small>STATUS</small><b>{result?.tumor ? 'Tumor detected' : 'Tumor not detected'}</b></span></div><div className="result-class"><span>CLASSIFICATION</span><h3>{result?.type}</h3></div><div className="confidence-row"><span>CONFIDENCE SCORE</span><span className="confidence-value">{result?.confidence.toFixed(2)}%</span></div><div className="confidence-track"><span style={{ width: `${result?.confidence ?? 0}%` }} /></div><div className="result-disclaimer">This AI-generated result is for informational support only and is not a diagnosis.</div><button className="json-toggle" onClick={() => setShowJson(!showJson)} aria-expanded={showJson}><FileJson2 size={15} /> {showJson ? 'Hide' : 'Inspect'} raw JSON <span>{showJson ? '−' : '+'}</span></button>{showJson && <pre className="json-output">{JSON.stringify(rawResponse, null, 2)}</pre>}</div>}
+            <div className="result-actions">{result ? <button className="button-secondary" onClick={reset}><RotateCcw size={15} /> Start over</button> : <button className="analyze-button" onClick={analyze} disabled={!file || loading}>{loading ? <><span className="button-spinner" /> Analyzing MRI…</> : <>Analyze MRI <ArrowRight size={16} /></>}</button>}</div>
           </div>
         </div>
-        <p className="medical-notice"><span>IMPORTANT</span> This is an educational interface prototype, not a medical device. No image is analyzed and no diagnosis is provided. Always consult a qualified healthcare professional.</p>
+        <p className="medical-notice"><span>IMPORTANT</span> AI-generated results are not a diagnosis and are not a substitute for professional medical advice. Always consult a qualified healthcare professional.</p>
       </section>
       <footer className="footer"><a className="brand" href="#top"><span className="brand-mark"><Brain size={16} /></span><span>neuro<span className="brand-light">sight</span><sup>AI</sup></span></a><span>DESIGNED FOR A MORE HUMAN VIEW OF HEALTH.</span><a href="#top">BACK TO TOP ↑</a></footer>
     </main>
